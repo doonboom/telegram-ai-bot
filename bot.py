@@ -1,29 +1,68 @@
 import os
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
 from openai import AsyncOpenAI
 from telegram import Update
 from telegram.ext import Application, MessageHandler, ContextTypes, filters
 
+
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 OPENAI_API_KEY = os.environ["OPENAI_API_KEY"]
 
+PORT = int(os.environ.get("PORT", "10000"))
+
 client = AsyncOpenAI(api_key=OPENAI_API_KEY)
+
 
 SYSTEM_PROMPT = """
 Sen Agrobank Namangan hududiy AI yordamchisisan.
 
 Foydalanuvchilarga o'zbek tilida sodda, hurmatli va aniq javob ber.
 Savol rus tilida bo'lsa, rus tilida javob ber.
+
 Bank kreditlari, bank xizmatlari va umumiy savollarga yordam ber.
 
 Agar aniq bank sharti yoki rasmiy ma'lumot mavjud bo'lmasa,
 taxminiy ma'lumotni fakt sifatida bermagin.
-Kerak bo'lsa, foydalanuvchini bankning rasmiy manbasiga murojaat qilishga yo'naltir.
+
+Kerak bo'lsa, foydalanuvchini Agrobankning rasmiy manbasiga
+murojaat qilishga yo'naltir.
 
 Kredit hisob-kitobida summa, foiz, muddat va annuitet kabi
 parametrlarni hisobga ol.
+
+Javoblarni imkon qadar qisqa, tushunarli va foydali ber.
 """
 
-async def answer_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+# Render uchun kichik HTTP server
+class HealthHandler(BaseHTTPRequestHandler):
+
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(b"Agrobank AI bot is running")
+
+    def do_HEAD(self):
+        self.send_response(200)
+        self.end_headers()
+
+    def log_message(self, format, *args):
+        return
+
+
+def start_health_server():
+    server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
+    print(f"Health server PORT: {PORT}")
+    server.serve_forever()
+
+
+async def answer_message(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
     if not update.message or not update.message.text:
         return
 
@@ -48,13 +87,27 @@ async def answer_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     except Exception as e:
         print("ERROR:", e)
+
         await update.message.reply_text(
             "Kechirasiz, hozir AI xizmatida vaqtinchalik muammo yuz berdi."
         )
 
 
 def main():
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+
+    # Render portini ochamiz
+    threading.Thread(
+        target=start_health_server,
+        daemon=True
+    ).start()
+
+    # Telegram bot
+    app = (
+        Application
+        .builder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .build()
+    )
 
     app.add_handler(
         MessageHandler(
@@ -64,6 +117,7 @@ def main():
     )
 
     print("Agrobank AI bot ishga tushdi...")
+
     app.run_polling()
 
 
